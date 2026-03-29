@@ -2223,9 +2223,16 @@ Additional Experience (Rules or Strategies):
 Solve the new problem and explain what part of experience you use and how you use it in the reasoning process:
 {prompt}"""
 
+        PR_HINT_SOLVE_PROMPT_TEMPLATE = """{prompt}
+
+Here is a reference solution for your consideration:
+{hint}
+
+Please solve the problem step by step. You may use, correct, or ignore the reference solution above."""
 
         self.experience_update_prompt = EXPERIENCE_UPDATE_PROMPT
         self.experience_solve_prompt_template = EXPERIENCE_SOLVE_PROMPT_TEMPLATE
+        self.pr_hint_solve_prompt_template = PR_HINT_SOLVE_PROMPT_TEMPLATE
 
         if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
             val_metrics = self._validate()
@@ -2325,10 +2332,16 @@ Solve the new problem and explain what part of experience you use and how you us
                                 gen_batch_with_exp = gen_batch.select(deepcopy=True)
                                 batch_with_exp = batch.select(deepcopy=True)
                                 
+                                use_per_sample_hint = self.config.trainer.get('use_per_sample_hint', False)
+                                hint_key = self.config.trainer.get('hint_key', 'glm5_hint')
+
                                 updated_gen_inputs = []
                                 for i in range(len(gen_batch_with_exp)):
                                     msgs = deepcopy(gen_batch_with_exp.non_tensor_batch['raw_prompt'][i])
-                                    exp_to_use = rng.choice(EXPERIENCES)
+                                    if use_per_sample_hint and hint_key in batch.non_tensor_batch:
+                                        exp_to_use = str(batch.non_tensor_batch[hint_key][i])
+                                    else:
+                                        exp_to_use = rng.choice(EXPERIENCES)
                                     if self.config.trainer.train_system_prompt:
                                         if isinstance(msgs, np.ndarray):
                                             msgs = msgs.tolist()
@@ -2336,7 +2349,9 @@ Solve the new problem and explain what part of experience you use and how you us
                                             msgs.insert(0, {"role": "system", "content": exp_to_use})
                                     else: 
                                         content = msgs[-1]['content']
-                                        if exp_to_use:
+                                        if use_per_sample_hint and exp_to_use:
+                                            updated_content = self.pr_hint_solve_prompt_template.format(prompt=content, hint=exp_to_use)
+                                        elif exp_to_use:
                                             updated_content = EXPERIENCE_SOLVE_PROMPT_TEMPLATE.format(experience=exp_to_use, prompt=content)
                                         else:
                                             updated_content = content
